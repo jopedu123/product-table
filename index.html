@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>多表动态数据管理系统</title>
+  <!-- 引入 SheetJS 用于处理 Excel 导入导出 -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root { --primary: #4f46e5; --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --border: #e2e8f0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 20px; }
+    
+    /* 登录模态框 */
+    #login-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 999; }
+    .modal-box { background: #fff; padding: 30px; border-radius: 12px; width: 360px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    .modal-box h3 { margin-bottom: 15px; color: var(--primary); }
+    .modal-box input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 15px; font-size: 15px; text-align: center; outline: none; }
+    .modal-box button { width: 100%; padding: 10px; background: var(--primary); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 15px; }
+    
+    .container { max-width: 1400px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: var(--card); padding: 15px 25px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    h1 { font-size: 20px; color: var(--primary); }
+    
+    .toolbar { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; background: var(--card); padding: 15px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    button { padding: 8px 16px; background: var(--primary); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: opacity 0.2s; }
+    button:hover { opacity: 0.9; }
+    button.secondary { background: #64748b; }
+    button.danger { background: #ef4444; }
+    input[type="text"] { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; outline: none; }
+    input[type="file"] { display: none; }
+    
+    .table-container { background: var(--card); border-radius: 12px; overflow-x: auto; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+    th, td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    th { background: #f1f5f9; font-weight: 600; color: #475569; }
+    tr:hover { background: #f8fafc; }
+    td[contenteditable="true"]:focus { background: #eff6ff; outline: 2px solid var(--primary); border-radius: 4px; }
+    
+    .tabs { display: flex; gap: 8px; margin-bottom: 15px; }
+    .tab { padding: 8px 16px; background: #e2e8f0; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; color: #475569; }
+    .tab.active { background: var(--primary); color: #fff; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- 登录框 -->
+  <div id="login-modal">
+    <div class="modal-box">
+      <h3>🔒 数据汇总表登录</h3>
+      <input type="password" id="pwd-input" placeholder="输入访问密码 (默认 2026abc)" onkeydown="if(event.key==='Enter') doLogin()" />
+      <button onclick="doLogin()">进 入 系 统</button>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div class="container" id="main-app" style="display:none;">
+    <header>
+      <h1>📁 多表动态数据管理中心</h1>
+      <button class="secondary" onclick="logout()">退出登录</button>
+    </header>
+
+    <!-- 顶层功能标签页 -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('sheets', this)">📋 表格管理</div>
+      <div class="tab" onclick="switchTab('overview', this)">📊 跨表总览</div>
+      <div class="tab" onclick="switchTab('history', this)">🕒 操作历史</div>
+    </div>
+
+    <!-- 表格管理面板 -->
+    <div id="panel-sheets" class="panel active">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div class="tabs" id="sheet-tabs" style="margin-bottom:0;"></div>
+        <div style="display:flex; gap:8px;">
+          <button onclick="newSheet()">+ 新建表</button>
+          <button class="danger" onclick="delSheet()">删除当前表</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="🔍 搜索当前表数据..." oninput="render()" style="flex-grow:1;" />
+        <button onclick="addRow()">+ 添加行</button>
+        <button class="secondary" onclick="document.getElementById('file').click()">📥 导入Excel</button>
+        <input type="file" id="file" accept=".xlsx,.xls" onchange="importExcel(this)" />
+        <button class="secondary" onclick="exportExcel()">📤 导出Excel</button>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead id="thead"></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 跨表总览面板 -->
+    <div id="panel-overview" class="panel">
+      <div class="table-container">
+        <table>
+          <thead><tr><th>表名</th><th>数据行数</th><th>运行状态</th></tr></thead>
+          <tbody id="overview-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 操作历史面板 -->
+    <div id="panel-history" class="panel">
+      <div class="table-container">
+        <table>
+          <thead><tr><th>操作时间</th><th>动作类型</th><th>详细描述</th><th>操作</th></tr></thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 后端 Worker 绝对路径
+    const API = "https://product-table-api.gu9090.workers.dev";
+    let PWD = localStorage.getItem("pwd") || "2026abc";
+    let sheets = [], curSheet = 1, cols = [], data = [];
+
+    // 检查本地登录态
+    if (localStorage.getItem("logged") === "true") {
+      document.getElementById("login-modal").style.display = "none";
+      document.getElementById("main-app").style.display = "block";
+      init();
+    }
+
+    async function doLogin() {
+      const val = document.getElementById("pwd-input").value;
+      try {
+        const res = await fetch(`${API}/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: val })
+        });
+        const json = await res.json();
+        if (json.ok) {
+          PWD = val;
+          localStorage.setItem("pwd", val);
+          localStorage.setItem("logged", "true");
+          document.getElementById("login-modal").style.display = "none";
+          document.getElementById("main-app").style.display = "block";
+          init();
+        } else {
+          alert("密码错误，请重新输入！");
+        }
+      } catch (e) { 
+        alert("连接后端服务器失败: " + e.message); 
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem("logged");
+      localStorage.removeItem("pwd");
+      location.reload();
+    }
+
+    // 统一封装带身份凭证的 API 请求
+    async function api(path, opt = {}) {
+      opt.headers = opt.headers || {};
+      opt.headers["X-Password"] = PWD;
+      if (opt.body && typeof opt.body === "object") {
+        opt.body = JSON.stringify(opt.body);
+        opt.headers["Content-Type"] = "application/json";
+      }
+      const res = await fetch(`${API}${path}`, opt);
+      if (res.status === 401) { 
+        logout(); 
+        throw new Error("登录授权已失效，请重新登录"); 
+      }
+      return res.json();
+    }
+
+    async function init() { 
+      await loadSheets(); 
+    }
+
+    function switchTab(name, el) {
+      document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+      if(el) el.classList.add('active');
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById(`panel-${name}`).classList.add('active');
+      if (name === 'overview') loadOverview();
+      if (name === 'history') loadHistory();
+    }
+
+    async function loadSheets() {
+      sheets = await api('/api/sheets');
+      if (!Array.isArray(sheets)) sheets = [];
+      const box = document.getElementById('sheet-tabs');
+      box.innerHTML = "";
+      if (!sheets.length) return;
+      if (!sheets.some(s => s.id === curSheet)) curSheet = sheets[0].id;
+      sheets.forEach(s => {
+        const d = document.createElement('div');
+        d.className = `tab ${s.id === curSheet ? 'active' : ''}`;
+        d.innerText = s.name;
+        d.onclick = () => { curSheet = s.id; loadSheets(); };
+        box.appendChild(d);
+      });
+      await loadData();
+    }
+
+    async function loadData() {
+      const c = await api(`/api/columns?sheet_id=${curSheet}`);
+      cols = c.columns || [];
+      data = await api(`/api/list?sheet_id=${curSheet}`);
+      if (!Array.isArray(data)) data = [];
+      render();
+    }
+
+    function render() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const head = document.getElementById('thead');
+      const body = document.getElementById('tbody');
+
+      let h = `<tr><th>ID</th>`;
+      cols.forEach(col => h += `<th>${col} <span style="cursor:pointer;color:red;" title="修改列名" onclick="renameCol('${col}')">✏️</span></th>`);
+      h += `<th><button style="padding:2px 6px;" onclick="addCol()">+ 新增列</button></th></tr>`;
+      head.innerHTML = h;
+
+      body.innerHTML = "";
+      const filtered = data.filter(r => !q || Object.values(r).some(v => String(v).toLowerCase().includes(q)));
+      if (!filtered.length) {
+        body.innerHTML = `<tr><td colspan="${cols.length + 2}" style="text-align:center;color:#94a3b8;padding:30px;">暂无匹配数据</td></tr>`;
+        return;
+      }
+      filtered.forEach(row => {
+        let tr = document.createElement('tr');
+        let html = `<td>${row.id}</td>`;
+        cols.forEach(col => {
+          html += `<td contenteditable="true" onblur="updateCell(${row.id}, '${col}', this.innerText)">${row[col] !== undefined ? row[col] : ""}</td>`;
+        });
+        html += `<td><button class="danger" style="padding:2px 6px;" onclick="delRow(${row.id})">删除</button></td>`;
+        tr.innerHTML = html;
+        body.appendChild(tr);
+      });
+    }
+
+    async function newSheet() {
+      const name = prompt("请输入新表名：", "产品统计表");
+      if (!name) return;
+      await api('/api/sheets', { method: 'POST', body: { name } });
+      loadSheets();
+    }
+
+    async function delSheet() {
+      if (sheets.length <= 1) { alert("系统提示：至少需要保留一个表格！"); return; }
+      if (!confirm("确定要删除当前表格及其所有数据吗？")) return;
+      await api('/api/sheets', { method: 'DELETE', body: { id: curSheet } });
+      loadSheets();
+    }
+
+    async function addCol() {
+      const name = prompt("请输入新列名：", "备注");
+      if (!name || cols.includes(name)) return;
+      cols.push(name);
+      await api('/api/columns', { method: 'POST', body: { sheet_id: curSheet, columns: cols } });
+      render();
+    }
+
+    async function renameCol(oldName) {
+      const newName = prompt("将列名修改为：", oldName);
+      if (!newName || newName === oldName) return;
+      cols = cols.map(c => c === oldName ? newName : c);
+      data.forEach(r => { if(r[oldName] !== undefined) { r[newName] = r[oldName]; delete r[oldName]; } });
+      await api('/api/columns', { method: 'POST', body: { sheet_id: curSheet, columns: cols } });
+      for(let r of data) await api('/api/update', { method: 'POST', body: { sheet_id: curSheet, data: r } });
+      render();
+    }
+
+    async function addRow() {
+      const empty = {}; cols.forEach(c => empty[c] = "");
+      await api('/api/add', { method: 'POST', body: { sheet_id: curSheet, data: empty } });
+      loadData();
+    }
+
+    async function updateCell(id, col, val) {
+      let r = data.find(x => x.id === id);
+      if (!r) return;
+      r[col] = val;
+      await api('/api/update', { method: 'POST', body: { sheet_id: curSheet, data: r } });
+    }
+
+    async function delRow(id) {
+      if(!confirm("确定要删除该行数据吗？")) return;
+      await api('/api/del', { method: 'POST', body: { id } });
+      loadData();
+    }
+
+    function importExcel(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        if (!rows.length) return alert("导入的表格内容为空！");
+        await api('/api/import', { method: 'POST', body: { sheet_id: curSheet, rows } });
+        alert("Excel 数据导入成功！");
+        input.value = "";
+        loadData();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function exportExcel() {
+      if (!data.length) return alert("当前无数据可导出");
+      const clean = data.map(({id, sheet_id, ...rest}) => rest);
+      const ws = XLSX.utils.json_to_sheet(clean);
+      const wb = XLSX.utils.book_new();
+      const sName = sheets.find(s => s.id === curSheet)?.name || "data";
+      XLSX.utils.book_append_sheet(wb, ws, sName);
+      XLSX.writeFile(wb, `${sName}.xlsx`);
+    }
+
+    async function loadOverview() {
+      const res = await api('/api/overview');
+      let html = "";
+      res.sheets.forEach(s => { 
+        html += `<tr><td><b>${s.name}</b></td><td>${s.count} 行</td><td><span style="color:green;">●</span> ${s.total}</td></tr>`; 
+      });
+      document.getElementById('overview-tbody').innerHTML = html;
+    }
+
+    async function loadHistory() {
+      const list = await api('/api/history');
+      let html = "";
+      list.forEach(h => {
+        const t = new Date(h.created_at * 1000).toLocaleString();
+        html += `<tr><td>${t}</td><td><b>${h.action}</b></td><td>${h.desc}</td><td><button class="secondary" onclick="undo(${h.id})">清除历史</button></td></tr>`;
+      });
+      document.getElementById('history-tbody').innerHTML = html;
+    }
+
+    async function undo(id) {
+      if(!confirm("确定删除这条操作记录吗？")) return;
+      const res = await api('/api/undo', { method: 'POST', body: { id } });
+      if (res.ok) { loadHistory(); }
+    }
+  </script>
+</body>
+</html>
